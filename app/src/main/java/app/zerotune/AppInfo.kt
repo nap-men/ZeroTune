@@ -9,7 +9,7 @@ object AppInfo {
     const val AUTHOR = "nap_men"
 
     /** Ссылка на репозиторий с исходным кодом. Пока пусто — кнопка скрыта. Вставь ссылку, например https://github.com/ник/zerotune */
-    const val SOURCE_URL = ""
+    const val SOURCE_URL = "https://github.com/nap-men/ZeroTune"
 
 
     /** Версия из build.gradle.kts (versionName), например 1.1.0. */
