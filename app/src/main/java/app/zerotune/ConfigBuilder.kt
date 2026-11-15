@@ -23,6 +23,7 @@ object ConfigBuilder {
     )
 
     private val ipv4Re = Regex("""^\d{1,3}(\.\d{1,3}){3}(/\d{1,2})?$""")
+    private val ipv6Re = Regex("""^[0-9a-fA-F:.]+(/\d{1,3})?$""")
     private val prefixes = listOf("domain:", "full:", "regexp:", "keyword:", "geosite:", "geoip:")
 
     /** Локальный SOCKS-порт, на который hev-socks5-tunnel отдаёт трафик из VPN. */
@@ -39,6 +40,10 @@ object ConfigBuilder {
         return buildVless(s, routing, mtu, hev)
     }
 
+    /** IPv6 или подсеть: минимум два двоеточия и только hex-символы. Так `example.com:8080` остаётся доменом. */
+    private fun isIpv6(raw: String): Boolean =
+        raw.count { it == ':' } >= 2 && ipv6Re.matches(raw) && prefixes.none { raw.startsWith(it) }
+
     /** Разбирает список из строк: домены и IP/CIDR. */
     private fun parseList(text: String): Pair<List<String>, List<String>> {
         val domains = mutableListOf<String>()
@@ -46,7 +51,7 @@ object ConfigBuilder {
         for (line in text.lines()) {
             val raw = line.trim()
             if (raw.isEmpty() || raw.startsWith("#")) continue
-            if (ipv4Re.matches(raw) || (raw.contains(':') && prefixes.none { raw.startsWith(it) } && raw.all { it.isLetterOrDigit() || it == ':' || it == '/' || it == '.' } && !raw.contains("//"))) {
+            if (ipv4Re.matches(raw) || isIpv6(raw)) {
                 ips += raw
                 continue
             }

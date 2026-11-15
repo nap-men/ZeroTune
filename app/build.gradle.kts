@@ -12,9 +12,9 @@ android {
         minSdk = 24
         targetSdk = 34
         // Схема X.Y.Z: X — большое обновление, Y — среднее, Z — мелкие фиксы.
-        // versionCode = X*10000 + Y*100 + Z (1.6.3 -> 10603), он должен только расти.
-        versionCode = 10603
-        versionName = "1.6.3"
+        // versionCode = X*10000 + Y*100 + Z (1.6.4 -> 10604), он должен только расти.
+        versionCode = 10604
+        versionName = "1.6.4"
         ndk { abiFilters += listOf("arm64-v8a") } // почти все Huawei — arm64
     }
 
