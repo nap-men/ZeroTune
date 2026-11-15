@@ -1,0 +1,21 @@
+# Gradle / Android Studio
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.DS_Store
+
+# Сборки и ключи подписи / Builds and signing keys
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# Бинарные зависимости: не хранятся в репозитории, см. README
+# Binary dependencies: not stored in the repo, see README
+app/libs/*.aar
+app/src/main/jniLibs/
