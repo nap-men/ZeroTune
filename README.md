@@ -20,6 +20,7 @@ Most VPN clients have a huge number of settings nobody uses. ZeroTune keeps only
 - **Quick settings tile** that follows the real tunnel state
 - **Huawei / Honor helpers:** launch-manager guide, diagnostics screen, network-change handling, watchdog
 - **Appearance:** presets, custom colors (color wheel, saved colors), animated power button
+- **Logs tab** (bottom menu): app and Xray core events, filter by importance, copy/share with keys, UUIDs and server addresses hidden
 - **Languages:** English and Russian
 
 ## Requirements

@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import android.util.Log
 
 /** Плитка для шторки: тап — включить/выключить туннель. */
 class TunnelTileService : TileService() {
@@ -54,10 +53,16 @@ class TunnelTileService : TileService() {
         super.onDestroy()
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        AppLog.init(this)
+    }
+
     override fun onClick() {
+        AppLog.i("Tile", "нажатие на плитку (сейчас: ${TunnelVpnService.state})")
         if (TunnelVpnService.isUp(this) || TunnelVpnService.isConnecting(this)) {
             paint(Tile.STATE_INACTIVE, tr(R.string.tile_stopping))
-            try { TunnelVpnService.stop(this) } catch (t: Throwable) { Log.w("ZeroTune", "tile stop: $t") }
+            try { TunnelVpnService.stop(this) } catch (t: Throwable) { AppLog.w("Tile", "stop", t) }
             scheduleRerender()
             return
         }
@@ -72,7 +77,7 @@ class TunnelTileService : TileService() {
         try {
             TunnelVpnService.start(this)
         } catch (t: Throwable) {
-            Log.w("ZeroTune", "tile start: $t")
+            AppLog.w("Tile", "start", t)
             openApp(connect = true); return
         }
         scheduleRerender()

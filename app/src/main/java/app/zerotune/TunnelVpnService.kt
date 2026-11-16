@@ -12,13 +12,13 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
+import java.io.File
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.os.PowerManager
 import android.service.quicksettings.TileService
-import android.util.Log
 import android.widget.Toast
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -67,6 +67,7 @@ class TunnelVpnService : VpnService() {
 
         private fun setState(c: Context, s: TunnelState) {
             if (state == s) return
+            AppLog.i("State", "$state → $s")
             state = s
             mainHandler.post { onStateChanged?.invoke() }
             refreshTile(c.applicationContext)
@@ -101,6 +102,7 @@ class TunnelVpnService : VpnService() {
     private var lastNetwork: Network? = null
 
     @Volatile private var monitor: StatsMonitor? = null
+    @Volatile private var coreTail: CoreLogTail? = null
     @Volatile private var active = false
     private val notifLock = Any()
     private var lastNotifKey = ""
@@ -111,13 +113,15 @@ class TunnelVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        AppLog.init(this)
+        AppLog.i("Service", "сервис создан")
     }
 
     private val watchdog = object : Runnable {
         override fun run() {
             if (active && Store.wantOn(this@TunnelVpnService)) {
                 if (engine?.isRunning != true && !starting) {
-                    Log.w("ZeroTune", "watchdog: ядро не работает, перезапуск")
+                    AppLog.w("Watchdog", "ядро не работает, перезапуск")
                     restartCore()
                 }
                 if (active) ui.postDelayed(this, WATCHDOG_MS)
@@ -127,6 +131,7 @@ class TunnelVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            AppLog.i("Service", "команда: остановить")
             Store.setWantOn(this, false)
             shutdown(startId)
             return START_NOT_STICKY
@@ -134,6 +139,7 @@ class TunnelVpnService : VpnService() {
         // После startForegroundService на Android 8+ нужно успеть вызвать startForeground (5 секунд),
         // иначе система роняет приложение — поэтому вызываем его до любых проверок
         startForeground(NOTIF_ID, notification())
+        AppLog.i("Service", if (intent == null) "команда: перезапуск сервиса системой" else "команда: запустить")
         // START или перезапуск системой (intent == null) — поднимаем, если пользователь этого хочет
         if (intent == null && !Store.wantOn(this)) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -156,7 +162,7 @@ class TunnelVpnService : VpnService() {
             worker.execute {
                 starting = true
                 try { doRestart() }
-                catch (t: Throwable) { Log.e("ZeroTune", "restart crashed", t) } // исключение в потоке уронило бы всё приложение
+                catch (t: Throwable) { AppLog.e("Tunnel", "сбой в потоке запуска", t) } // исключение в потоке уронило бы всё приложение
                 finally { starting = false }
             }
         } catch (_: RejectedExecutionException) { /* сервис уже уничтожается */ }
@@ -179,19 +185,20 @@ class TunnelVpnService : VpnService() {
             } catch (t: Throwable) {
                 if (!wantHev) throw t
                 // hev не поднялся — не оставляем пользователя без VPN, откатываемся на встроенный туннель Xray
-                Log.w("ZeroTune", "hev не запустился, откат на встроенный режим", t)
+                AppLog.w("Tunnel", "hev не запустился, откат на встроенный режим", t)
                 Store.setLastError(this, tr(R.string.err_hev_fallback, Engine.describe(this, t)))
                 launch(link, false)
             }
             failures = 0
         } catch (t: Throwable) {
-            Log.e("ZeroTune", "start failed", t)
+            AppLog.e("Tunnel", "запуск не удался (${failures + 1}/$MAX_FAILURES): ${Engine.describe(this, t)}", t)
             Store.setLastError(this, Engine.describe(this, t))
             Store.setRunning(this, false)
             if (active) setState(this, TunnelState.CONNECTING) // ждём следующую попытку
             failures++
             if (failures >= MAX_FAILURES) {
                 // Не получается несколько раз подряд — останавливаемся, а не крутим перезапуски
+                AppLog.e("Tunnel", "$MAX_FAILURES неудачных запусков подряд — останавливаюсь")
                 Store.setWantOn(this, false)
                 ui.post { Toast.makeText(this, tr(R.string.toast_failed), Toast.LENGTH_LONG).show() }
                 shutdown()
@@ -209,7 +216,19 @@ class TunnelVpnService : VpnService() {
 
         val routing = Store.routing(this)
         val mtu = Store.mtu(this)
-        val config = ConfigBuilder.build(link, routing, mtu, hev)
+        val t0 = SystemClock.elapsedRealtime()
+        val si = ServerInfo.parse(link)
+        AppLog.addSecret(si?.host) // адрес сервера не должен попадать в скопированные логи
+        AppLog.i("Tunnel", "подключение: «${Store.activeProfile(this)?.name ?: "?"}» ${si?.tags?.joinToString("·") ?: ""}, " +
+            "режим ${if (hev) "hev" else "встроенный"}, MTU $mtu, приложения: ${when (routing.appMode) { 1 -> "только выбранные"; 2 -> "кроме выбранных"; else -> "все" }}")
+
+        // Журнал ядра: файл пересоздаём при каждом запуске и читаем его в общий журнал
+        coreTail?.stop(); coreTail = null
+        val coreLog = File(filesDir, "xray-core.log")
+        try { coreLog.delete() } catch (_: Throwable) {}
+        val verbose = Store.verboseLog(this)
+        val config = ConfigBuilder.build(link, routing, mtu, hev, coreLog.absolutePath, verbose)
+        if (verbose) AppLog.w("Tunnel", "подробный журнал ядра включён: в логах видны адреса сайтов")
         val b = Builder()
             .setSession("ZeroTune")
             .setMtu(mtu)
@@ -225,6 +244,7 @@ class TunnelVpnService : VpnService() {
 
         val pfd = b.establish() ?: error(tr(R.string.err_vpn_perm))
         tun = pfd
+        AppLog.i("Tunnel", "VPN-интерфейс создан")
 
         val e = Engine(this)
         try {
@@ -242,12 +262,13 @@ class TunnelVpnService : VpnService() {
         }
         engine = e
         lastLaunchAt = SystemClock.elapsedRealtime()
+        coreTail = CoreLogTail(coreLog).also { it.start() }
 
         Store.setRunning(this, true)
         setState(this, TunnelState.ON)
 
+        AppLog.i("Tunnel", "туннель поднят за ${(SystemClock.elapsedRealtime() - t0) / 1000.0} с")
         // Пинг меряем до адреса выбранного сервера
-        val si = ServerInfo.parse(link)
         monitor?.setTarget(si?.host ?: "", si?.port ?: 0)
         updateNotification(force = true)
     }
@@ -292,6 +313,7 @@ class TunnelVpnService : VpnService() {
                 // Сразу после запуска сеть ещё «шатается» (система гасит прежний VPN) — это не смена сети
                 if (SystemClock.elapsedRealtime() - lastLaunchAt < 5_000) return
 
+                AppLog.i("Net", "сеть сменилась — перезапуск ядра через 0.8 с")
                 ui.removeCallbacks(netRestart)
                 ui.postDelayed(netRestart, 800)
             }
@@ -326,12 +348,14 @@ class TunnelVpnService : VpnService() {
         t.isDaemon = true
         t.start()
         try { t.join(4000) } catch (_: InterruptedException) {}
+        if (t.isAlive) AppLog.w("Engine", "ядро не остановилось за 4 с, продолжаю без ожидания")
     }
 
     /** Останавливает всё, что держит туннель. Безопасно вызывать повторно. Флаг active выставляет вызывающий. */
     private fun cleanup() {
         synchronized(infraLock) {
             monitor?.stop(); monitor = null
+            coreTail?.stop(); coreTail = null
             ui.removeCallbacks(watchdog)
             ui.removeCallbacks(netRestart)
             netCallback?.let {
@@ -348,6 +372,7 @@ class TunnelVpnService : VpnService() {
     }
 
     private fun shutdown(startId: Int = -1) {
+        AppLog.i("Service", "остановка туннеля")
         // «Выключено» показываем сразу, не дожидаясь остановки ядра (она может занять время или зависнуть)
         synchronized(notifLock) { active = false }
         Store.setRunning(this, false)
@@ -364,7 +389,7 @@ class TunnelVpnService : VpnService() {
         try {
             worker.execute {
                 try { cleanup() }
-                catch (t: Throwable) { Log.w("ZeroTune", "cleanup failed", t) }
+                catch (t: Throwable) { AppLog.w("Service", "ошибка при очистке", t) }
                 finally { ui.post(finish) }
             }
         } catch (_: RejectedExecutionException) {
@@ -458,12 +483,14 @@ class TunnelVpnService : VpnService() {
     }
 
     override fun onRevoke() { // пользователь отключил VPN в системе или его перехватило другое приложение
+        AppLog.w("Service", "VPN отозван системой или перехвачен другим приложением")
         Store.setWantOn(this, false)
         shutdown()
     }
 
     override fun onDestroy() {
         // Систему могла остановить сервис без нашей команды: освобождаем ядро, TUN и wake lock
+        AppLog.i("Service", "сервис уничтожен")
         instance = null
         synchronized(notifLock) { active = false }
         Store.setRunning(this, false)

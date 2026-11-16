@@ -2,7 +2,15 @@ package app.zerotune
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.res.ColorStateList
+import android.graphics.Typeface
+import android.graphics.drawable.RippleDrawable
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.widget.ScrollView
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -77,6 +85,7 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
         Theme.apply(this)
         appliedStamp = Theme.stamp(this)
+        AppLog.init(applicationContext)
 
         power = findViewById(R.id.btnPower)
         powerAnim = PowerAnim(power, findViewById(R.id.ringA), findViewById(R.id.ringB))
@@ -111,6 +120,7 @@ class MainActivity : Activity() {
         hevInfo.text = getString(if (hevLib) R.string.hev_found else R.string.hev_missing)
         cbHev.setOnCheckedChangeListener { _, checked ->
             Store.setUseHev(this, checked)
+            AppLog.i("Settings", "быстрый туннель (hev): ${if (checked) "вкл" else "выкл"}")
             if (TunnelVpnService.isUp(this)) {
                 TunnelVpnService.start(this) // перезапуск в выбранном режиме
                 toast(getString(R.string.toast_mode_changed))
@@ -126,6 +136,7 @@ class MainActivity : Activity() {
                 toast(getString(R.string.toast_mtu_range))
             } else {
                 Store.setMtu(this, v)
+                AppLog.i("Settings", "MTU: $v")
                 if (TunnelVpnService.isUp(this)) {
                     TunnelVpnService.start(this) // перезапуск с новым MTU
                     toast(getString(R.string.toast_mtu_restart, v))
@@ -172,7 +183,19 @@ class MainActivity : Activity() {
             text = "↻ " + getString(R.string.ping_check)
             setOnClickListener { checkAllPings(force = true) }
         }
+        setupTabs(savedInstanceState)
         handleIntent(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("tab", tab)
+        outState.putInt("logRank", logRank)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (tab != 0) showTab(0) else super.onBackPressed()
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -195,9 +218,12 @@ class MainActivity : Activity() {
         renderServers()
         checkAllPings(force = false)
         ui.post(poll)
+        if (tab == 1) { AppLog.listener = { scheduleLogRender() }; renderLogs(true) }
     }
 
     override fun onPause() {
+        AppLog.listener = null
+        ui.removeCallbacks(logRender)
         ui.removeCallbacks(poll)
         powerAnim.stop() // не крутим анимации в фоне
         TunnelVpnService.refreshTile(this) // уходим из приложения — плитка должна показывать актуальное
@@ -240,6 +266,7 @@ class MainActivity : Activity() {
 
     private fun selectServer(p: Profile) {
         if (Store.activeProfile(this)?.id == p.id) return
+        AppLog.i("Servers", "выбран сервер «${p.name}»")
         Store.setActiveId(this, p.id)
         renderServers()
         render()
@@ -259,6 +286,7 @@ class MainActivity : Activity() {
             danger = true
         ) {
             val wasActive = Store.activeProfile(this)?.id == p.id
+            AppLog.i("Servers", "удалён сервер «${p.name}»")
             Store.removeProfile(this, p.id)
             renderServers()
             render()
@@ -309,6 +337,7 @@ class MainActivity : Activity() {
 
     private fun importText(text: String) {
         val r = Importer.import(this, text)
+        AppLog.i("Servers", "импорт: добавлено ${r.added}, дубликатов ${r.duplicates}, неверных ${r.invalid}")
         val msg = when {
             r.added == 1 -> getString(R.string.import_added, r.firstAdded?.name ?: "")
             r.added > 1 -> {
@@ -395,6 +424,7 @@ class MainActivity : Activity() {
 
     private fun onToggle() {
         power.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        AppLog.i("UI", "кнопка питания (сейчас: ${TunnelVpnService.state})")
         if (TunnelVpnService.isUp(this) || TunnelVpnService.isConnecting(this)) {
             pendingUntil = 0
             offUntil = SystemClock.elapsedRealtime() + 4000
@@ -511,6 +541,7 @@ class MainActivity : Activity() {
                     if (isDestroyed) return@runOnUiThread
                     pings[p.id] = ms
                     pingAt[p.id] = SystemClock.elapsedRealtime()
+                    AppLog.d("Ping", "«${p.name}»: ${if (ms >= 0) "$ms мс" else "недоступен"}")
                     pingViews[p.id]?.let { paintPing(it, ms) }
                 }
             }
@@ -535,10 +566,169 @@ class MainActivity : Activity() {
 
     private fun setLanguage(code: String) {
         if (code == Lang.current(this)) return
+        AppLog.i("UI", "язык: $code")
         Store.setLang(this, code)
         TunnelVpnService.instance?.updateNotification(force = true)
         TunnelVpnService.refreshTile(this)
         recreate()
+    }
+
+    // ---- вкладки и логи ----
+
+    private var tab = 0
+    private var logRank = 0
+    @Volatile private var logPosted = false
+    private val logRender = Runnable { logPosted = false; renderLogs(false) }
+
+    private fun setupTabs(state: Bundle?) {
+        findViewById<View>(R.id.navMain).setOnClickListener { showTab(0) }
+        findViewById<View>(R.id.navLogs).setOnClickListener { showTab(1) }
+
+        val cb = findViewById<CheckBox>(R.id.cbLogVerbose)
+        cb.isChecked = Store.verboseLog(this)
+        cb.setOnCheckedChangeListener { _, on ->
+            Store.setVerboseLog(this, on)
+            AppLog.i("Logs", "подробный режим ядра: ${if (on) "вкл" else "выкл"}")
+            toast(getString(if (on) R.string.logs_verbose_on else R.string.logs_verbose_off))
+        }
+        findViewById<View>(R.id.logFilterAll).setOnClickListener { setLogFilter(0) }
+        findViewById<View>(R.id.logFilterWarn).setOnClickListener { setLogFilter(AppLog.LEVEL_W) }
+        findViewById<View>(R.id.logFilterErr).setOnClickListener { setLogFilter(AppLog.LEVEL_E) }
+        findViewById<View>(R.id.btnLogCopy).setOnClickListener { copyLogs() }
+        findViewById<View>(R.id.btnLogShare).setOnClickListener { shareLogs() }
+        findViewById<View>(R.id.btnLogClear).setOnClickListener { confirmClearLogs() }
+
+        logRank = state?.getInt("logRank", 0) ?: 0
+        paintLogFilters()
+        showTab(state?.getInt("tab", 0) ?: 0, animate = false)
+    }
+
+    private fun showTab(i: Int, animate: Boolean = true) {
+        tab = i
+        val main = findViewById<View>(R.id.tabMain)
+        val logs = findViewById<View>(R.id.tabLogs)
+        main.visibility = if (i == 0) View.VISIBLE else View.GONE
+        logs.visibility = if (i == 1) View.VISIBLE else View.GONE
+        paintNav()
+        if (i == 1) {
+            AppLog.listener = { scheduleLogRender() }
+            renderLogs(true)
+        } else {
+            AppLog.listener = null
+        }
+        if (animate && Store.animations(this)) {
+            val v = if (i == 0) main else logs
+            v.alpha = 0f
+            v.animate().alpha(1f).setDuration(160).start()
+        }
+    }
+
+    /** Нижнее меню: активная вкладка цветом акцента, остальные приглушены. */
+    private fun paintNav() {
+        val pal = Theme.palette(this)
+        findViewById<View>(R.id.navDivider).setBackgroundColor(pal.stroke)
+        findViewById<View>(R.id.bottomNav).setBackgroundColor(pal.bg)
+        val ripple = if (pal.light) 0x22000000 else 0x33FFFFFF
+        fun item(box: Int, icon: Int, label: Int, on: Boolean) {
+            val c = if (on) pal.accent else pal.textSecondary
+            findViewById<ImageView>(icon).setColorFilter(c)
+            findViewById<TextView>(label).apply {
+                setTextColor(c)
+                setTypeface(null, if (on) Typeface.BOLD else Typeface.NORMAL)
+            }
+            findViewById<View>(box).background =
+                RippleDrawable(ColorStateList.valueOf(ripple), null, ColorDrawable(Color.WHITE))
+        }
+        item(R.id.navMain, R.id.navMainIcon, R.id.navMainLabel, tab == 0)
+        item(R.id.navLogs, R.id.navLogsIcon, R.id.navLogsLabel, tab == 1)
+    }
+
+    private fun setLogFilter(rank: Int) {
+        logRank = rank
+        paintLogFilters()
+        renderLogs(true)
+    }
+
+    private fun paintLogFilters() {
+        val pal = Theme.palette(this)
+        val chips = listOf(R.id.logFilterAll to 0, R.id.logFilterWarn to AppLog.LEVEL_W, R.id.logFilterErr to AppLog.LEVEL_E)
+        for ((id, rank) in chips) {
+            val v = findViewById<TextView>(id)
+            val on = logRank == rank
+            v.background = if (on) Theme.accentButton(this, pal) else Theme.button(this, pal)
+            v.setTextColor(if (on) pal.onAccent else pal.textPrimary)
+        }
+    }
+
+    private fun scheduleLogRender() {
+        if (logPosted) return
+        logPosted = true
+        ui.postDelayed(logRender, 400)
+    }
+
+    /** Перерисовывает список. Прокручивает вниз, если пользователь и так был внизу (или [toEnd]). */
+    private fun renderLogs(toEnd: Boolean) {
+        val tv = findViewById<TextView>(R.id.logText)
+        // Пока пользователь выделяет текст, не трогаем его, иначе выделение собьётся
+        if (!toEnd && tv.hasSelection()) return
+        val sc = findViewById<ScrollView>(R.id.logScroll)
+        val empty = findViewById<TextView>(R.id.logEmpty)
+        val pal = Theme.palette(this)
+        val list = AppLog.entries(logRank).takeLast(500)
+        empty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+
+        val child = sc.getChildAt(0)
+        val atBottom = toEnd || child == null || child.bottom - (sc.height + sc.scrollY) < dp(48)
+
+        val sb = SpannableStringBuilder()
+        for (e in list) {
+            val start = sb.length
+            sb.append(e.text)
+            val color = when (e.level) {
+                'E' -> 0xFFFF6B6B.toInt()
+                'W' -> pal.warn
+                'D' -> pal.textSecondary
+                else -> pal.textPrimary
+            }
+            sb.setSpan(ForegroundColorSpan(color), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.append('\n')
+        }
+        tv.text = sb
+        if (atBottom) sc.post { sc.scrollTo(0, sc.getChildAt(0)?.height ?: 0) }
+    }
+
+    private fun copyLogs() {
+        val cm = getSystemService(ClipboardManager::class.java)
+        cm.setPrimaryClip(ClipData.newPlainText("ZeroTune log", AppLog.exportText(this, logRank)))
+        toast(getString(R.string.logs_copied))
+    }
+
+    private fun shareLogs() {
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "ZeroTune log")
+            .putExtra(Intent.EXTRA_TEXT, AppLog.exportText(this, logRank))
+        try {
+            startActivity(Intent.createChooser(send, getString(R.string.logs_share_title)))
+        } catch (e: Exception) {
+            AppLog.w("Logs", "не удалось открыть «Поделиться»", e)
+        }
+    }
+
+    private fun confirmClearLogs() {
+        AppDialog.show(
+            this,
+            title = getString(R.string.logs_clear_title),
+            message = getString(R.string.logs_clear_msg),
+            positive = getString(R.string.logs_clear),
+            negative = getString(R.string.dlg_cancel),
+            danger = true
+        ) {
+            AppLog.clear()
+            AppLog.i("Logs", "логи очищены")
+            renderLogs(true)
+            toast(getString(R.string.logs_cleared))
+        }
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
