@@ -1,7 +1,6 @@
 package app.zerotune
 
 import android.content.Context
-import android.util.Log
 import com.v2ray.ang.service.TProxyService
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
@@ -22,7 +21,6 @@ import java.util.zip.ZipFile
 class Engine(private val ctx: Context) {
 
     companion object {
-        private const val TAG = "ZeroTune"
         private const val TUN_IPV4 = "10.10.14.1"
         private const val TUN_IPV6 = "fd00::1"
 
@@ -47,7 +45,7 @@ class Engine(private val ctx: Context) {
                     true
                 } catch (t: Throwable) {
                     hevThrowable = t
-                    Log.w(TAG, "hev-socks5-tunnel unavailable: $t", t)
+                    AppLog.w("Engine", "hev-socks5-tunnel не загрузился", t)
                     false
                 }
             }
@@ -93,7 +91,7 @@ class Engine(private val ctx: Context) {
         override fun startup(): Long = 0
         override fun shutdown(): Long = 0
         override fun onEmitStatus(code: Long, msg: String?): Long {
-            Log.d(TAG, "core: $msg")
+            if (!msg.isNullOrBlank()) AppLog.d("Core", msg)
             return 0
         }
     }
@@ -107,6 +105,7 @@ class Engine(private val ctx: Context) {
         }
 
     fun start(configJson: String, tunFd: Int, mtu: Int, hev: Boolean) {
+        AppLog.i("Engine", "запуск ядра Xray (${if (hev) "через hev-socks5-tunnel" else "встроенный TUN"}, MTU $mtu)")
         Libv2ray.initCoreEnv(ctx.filesDir.absolutePath, "")
         val c = Libv2ray.newCoreController(handler)
         // В режиме hev ядро не должно трогать TUN, поэтому fd = 0
@@ -117,7 +116,7 @@ class Engine(private val ctx: Context) {
             val yaml = File(ctx.filesDir, "hev-socks5-tunnel.yaml")
             yaml.writeText(hevConfig(mtu))
             val ok = TProxyService.start(yaml.absolutePath, tunFd)
-            Log.i(TAG, "hev-socks5-tunnel start -> $ok")
+            AppLog.i("Engine", "hev-socks5-tunnel: запуск → ${if (ok) "ok" else "ошибка"}")
             // Без hev в этом режиме туннеля нет вовсе, поэтому ошибку отдаём наверх (сервис откатится на встроенный режим)
             if (!ok) throw IllegalStateException("hev-socks5-tunnel failed to start (start returned false)")
             hevRunning = true
@@ -126,10 +125,10 @@ class Engine(private val ctx: Context) {
 
     fun stop() {
         if (hevRunning) {
-            try { TProxyService.stop() } catch (e: Throwable) { Log.w(TAG, "hev stop: $e") }
+            try { TProxyService.stop() } catch (e: Throwable) { AppLog.w("Engine", "hev stop", e) }
             hevRunning = false
         }
-        try { controller?.stopLoop() } catch (e: Throwable) { Log.w(TAG, "stop: $e") }
+        try { controller?.stopLoop() } catch (e: Throwable) { AppLog.w("Engine", "остановка ядра", e) }
         controller = null
     }
 

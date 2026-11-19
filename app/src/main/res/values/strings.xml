@@ -191,4 +191,26 @@
     <string name="about_author">Создано %1$s</string>
     <string name="about_author_text">Сделано для удобного использования: в большинстве VPN-клиентов огромное количество настроек, которыми никто не пользуется. Здесь собрана самая базовая база — и больше ничего не нужно.</string>
     <string name="about_ai">Приложение создано с помощью ИИ (Claude от Anthropic): код написан в диалоге с нейросетью и проверен на реальных устройствах.</string>
+
+    <!-- Нижнее меню и логи -->
+    <string name="nav_main">Главная</string>
+    <string name="nav_logs">Логи</string>
+    <string name="logs_title">Логи</string>
+    <string name="logs_sub">События приложения и ядра Xray</string>
+    <string name="logs_filter_all">Все</string>
+    <string name="logs_filter_warn">Важные</string>
+    <string name="logs_filter_err">Ошибки</string>
+    <string name="logs_empty">Пока пусто. События появятся, когда ты подключишься или добавишь сервер.</string>
+    <string name="logs_verbose">Подробный режим ядра</string>
+    <string name="logs_verbose_hint">Ядро пишет больше: в логах будут видны посещаемые сайты. Применится при следующем подключении. Выключай, когда не нужно.</string>
+    <string name="logs_copy">Копировать</string>
+    <string name="logs_share">Поделиться</string>
+    <string name="logs_clear">Очистить</string>
+    <string name="logs_copied">Логи скопированы. Ключи, UUID и адреса серверов скрыты.</string>
+    <string name="logs_cleared">Логи очищены</string>
+    <string name="logs_clear_title">Очистить логи?</string>
+    <string name="logs_clear_msg">Все записи будут удалены.</string>
+    <string name="logs_share_title">Поделиться логами</string>
+    <string name="logs_verbose_on">Подробный режим включён. Переподключись, чтобы он заработал.</string>
+    <string name="logs_verbose_off">Подробный режим выключен</string>
 </resources>

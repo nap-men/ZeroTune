@@ -33,11 +33,12 @@ object ConfigBuilder {
      * @param hev true — Xray слушает локальный SOCKS, а пакеты из VPN в него переправляет
      * нативный hev-socks5-tunnel (быстрее); false — встроенный TUN-вход Xray (gVisor).
      */
-    fun build(input: String, routing: Routing = Routing(), mtu: Int = 1500, hev: Boolean = false): String {
+    fun build(input: String, routing: Routing = Routing(), mtu: Int = 1500, hev: Boolean = false,
+              logPath: String? = null, verbose: Boolean = false): String {
         val s = input.trim()
         if (s.startsWith("{")) return s
         require(s.startsWith("vless://")) { "Only a vless:// link or a ready JSON config is supported" }
-        return buildVless(s, routing, mtu, hev)
+        return buildVless(s, routing, mtu, hev, logPath, verbose)
     }
 
     /** IPv6 или подсеть: минимум два двоеточия и только hex-символы. Так `example.com:8080` остаётся доменом. */
@@ -77,6 +78,19 @@ object ConfigBuilder {
         return out
     }
 
+    /**
+     * Журнал ядра. Обычный режим: только предупреждения и ошибки в файл, журнал доступа выключен.
+     * Подробный: ещё и журнал доступа (какие адреса открывались), поэтому включается только вручную.
+     */
+    private fun buildLog(path: String?, verbose: Boolean): JSONObject {
+        val log = JSONObject().put("loglevel", if (verbose) "info" else "warning")
+        if (path != null) {
+            log.put("error", path)
+            log.put("access", if (verbose) path else "none")
+        }
+        return log
+    }
+
     private fun buildRouting(r: Routing): JSONObject {
         val (blockD, blockI) = parseList(r.block)
         val (directD, directI) = parseList(r.direct)
@@ -107,7 +121,7 @@ object ConfigBuilder {
         return JSONObject().put("domainStrategy", "AsIs").put("rules", list)
     }
 
-    private fun buildVless(link: String, routing: Routing, mtu: Int, hev: Boolean): String {
+    private fun buildVless(link: String, routing: Routing, mtu: Int, hev: Boolean, logPath: String?, verbose: Boolean): String {
         val u = Uri.parse(link)
         val id = u.userInfo ?: error("no UUID")
         val host = u.host ?: error("no address")
@@ -181,7 +195,7 @@ object ConfigBuilder {
         val dns = JSONObject().put("servers", JSONArray().put("1.1.1.1").put("8.8.8.8"))
 
         return JSONObject()
-            .put("log", JSONObject().put("loglevel", "warning"))
+            .put("log", buildLog(logPath, verbose))
             .put("dns", dns)
             .put("inbounds", JSONArray().put(inbound))
             // proxy первым — он же исходящий по умолчанию

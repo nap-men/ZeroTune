@@ -191,4 +191,26 @@
     <string name="about_author">Created by %1$s</string>
     <string name="about_author_text">Made for convenience: most VPN clients have a huge number of settings nobody uses. Here only the essential basics are collected — and nothing more is needed.</string>
     <string name="about_ai">This app was made with the help of AI (Claude by Anthropic): the code was written in a conversation with a neural network and tested on real devices.</string>
+
+    <!-- Bottom menu and logs -->
+    <string name="nav_main">Home</string>
+    <string name="nav_logs">Logs</string>
+    <string name="logs_title">Logs</string>
+    <string name="logs_sub">App and Xray core events</string>
+    <string name="logs_filter_all">All</string>
+    <string name="logs_filter_warn">Important</string>
+    <string name="logs_filter_err">Errors</string>
+    <string name="logs_empty">Nothing here yet. Events will show up when you connect or add a server.</string>
+    <string name="logs_verbose">Verbose core mode</string>
+    <string name="logs_verbose_hint">The core writes more, and the visited sites will be visible in the logs. Applies on the next connect. Turn it off when you don\'t need it.</string>
+    <string name="logs_copy">Copy</string>
+    <string name="logs_share">Share</string>
+    <string name="logs_clear">Clear</string>
+    <string name="logs_copied">Logs copied. Keys, UUIDs and server addresses are hidden.</string>
+    <string name="logs_cleared">Logs cleared</string>
+    <string name="logs_clear_title">Clear the logs?</string>
+    <string name="logs_clear_msg">All entries will be deleted.</string>
+    <string name="logs_share_title">Share logs</string>
+    <string name="logs_verbose_on">Verbose mode is on. Reconnect to apply it.</string>
+    <string name="logs_verbose_off">Verbose mode is off</string>
 </resources>

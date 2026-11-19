@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.TrafficStats
 import android.os.PowerManager
 import android.os.Process
-import android.util.Log
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -100,7 +99,7 @@ class StatsMonitor(private val ctx: Context, private val onUpdate: () -> Unit) {
         try {
             block()
         } catch (t: Throwable) {
-            Log.w("ZeroTune", "stats: $t")
+            AppLog.w("Stats", "счётчики трафика", t)
         }
     }
 

@@ -197,6 +197,10 @@ object Store {
         )
     }
 
+    /** Подробный журнал ядра (в нём видны посещаемые сайты), по умолчанию выключен. */
+    fun verboseLog(c: Context): Boolean = p(c).getBoolean("log_verbose", false)
+    fun setVerboseLog(c: Context, v: Boolean) = p(c).edit().putBoolean("log_verbose", v).apply()
+
     fun saveRouting(c: Context, r: Routing) {
         p(c).edit()
             .putInt("r_app_mode", r.appMode)
